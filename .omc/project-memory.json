@@ -1,0 +1,269 @@
+{
+  "version": "1.0.0",
+  "lastScanned": 1789319092480,
+  "projectRoot": "e:\\project\\FuckJob",
+  "techStack": {
+    "languages": [
+      {
+        "name": "JavaScript/TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "package.json"
+        ]
+      },
+      {
+        "name": "TypeScript",
+        "version": null,
+        "confidence": "high",
+        "markers": [
+          "tsconfig.json"
+        ]
+      }
+    ],
+    "frameworks": [
+      {
+        "name": "react",
+        "version": "19.1.0",
+        "category": "frontend"
+      },
+      {
+        "name": "react-dom",
+        "version": "19.1.0",
+        "category": "frontend"
+      },
+      {
+        "name": "vite",
+        "version": "7.0.4",
+        "category": "build"
+      },
+      {
+        "name": "vitest",
+        "version": "4.1.10",
+        "category": "testing"
+      }
+    ],
+    "packageManager": "pnpm",
+    "runtime": null
+  },
+  "build": {
+    "buildCommand": "pnpm build",
+    "testCommand": "pnpm test",
+    "lintCommand": null,
+    "devCommand": "pnpm dev",
+    "scripts": {
+      "dev": "vite",
+      "build": "tsc && vite build",
+      "preview": "vite preview",
+      "test": "vitest",
+      "test:run": "vitest run",
+      "check:network": "node scripts/check-network-boundary.mjs",
+      "tauri": "tauri"
+    }
+  },
+  "conventions": {
+    "namingStyle": null,
+    "importStyle": null,
+    "testPattern": null,
+    "fileOrganization": "type-based"
+  },
+  "structure": {
+    "isMonorepo": false,
+    "workspaces": [],
+    "mainDirectories": [
+      "docs",
+      "public",
+      "scripts",
+      "src"
+    ],
+    "gitBranches": {
+      "defaultBranch": "master",
+      "branchingStrategy": null
+    }
+  },
+  "customNotes": [],
+  "directoryMap": {
+    "dist": {
+      "path": "dist",
+      "purpose": "Distribution/build output",
+      "fileCount": 7,
+      "lastAccessed": 1789319092296,
+      "keyFiles": [
+        "background.jpg",
+        "background.png",
+        "index.html",
+        "logo.png",
+        "logo2.png"
+      ]
+    },
+    "docs": {
+      "path": "docs",
+      "purpose": "Documentation",
+      "fileCount": 3,
+      "lastAccessed": 1789319092297,
+      "keyFiles": [
+        "model-configuration.md",
+        "privacy-and-network.md",
+        "updater-release.md"
+      ]
+    },
+    "output": {
+      "path": "output",
+      "purpose": null,
+      "fileCount": 4,
+      "lastAccessed": 1789319092315,
+      "keyFiles": [
+        "boss-chat-tab-timeout-delivery.md",
+        "boss-chat-tab-timeout-diagnosis.md",
+        "boss-chat-tab-timeout-fix.md",
+        "boss-chat-tab-timeout-review.md"
+      ]
+    },
+    "public": {
+      "path": "public",
+      "purpose": "Public files",
+      "fileCount": 6,
+      "lastAccessed": 1789319092316,
+      "keyFiles": [
+        "background.jpg",
+        "background.png",
+        "logo.png",
+        "logo2.png",
+        "tauri.svg"
+      ]
+    },
+    "scripts": {
+      "path": "scripts",
+      "purpose": "Build/utility scripts",
+      "fileCount": 5,
+      "lastAccessed": 1789319092317,
+      "keyFiles": [
+        "check-network-boundary.mjs",
+        "check-release-version.mjs",
+        "liepin-send-dom.node-test.mjs",
+        "rewrite-updater-json.mjs",
+        "rewrite-updater-json.node-test.mjs"
+      ]
+    },
+    "site": {
+      "path": "site",
+      "purpose": null,
+      "fileCount": 2,
+      "lastAccessed": 1789319092318,
+      "keyFiles": [
+        "guide.html",
+        "index.html"
+      ]
+    },
+    "src": {
+      "path": "src",
+      "purpose": "Source code",
+      "fileCount": 4,
+      "lastAccessed": 1789319092318,
+      "keyFiles": [
+        "App.css",
+        "App.tsx",
+        "main.tsx",
+        "vite-env.d.ts"
+      ]
+    },
+    "src-tauri": {
+      "path": "src-tauri",
+      "purpose": null,
+      "fileCount": 5,
+      "lastAccessed": 1789319092319,
+      "keyFiles": [
+        "build.rs",
+        "Cargo.lock",
+        "Cargo.toml",
+        "tauri.conf.json"
+      ]
+    },
+    "dist\\assets": {
+      "path": "dist\\assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1789319092358,
+      "keyFiles": [
+        "index-Be5OPX5c.css",
+        "index-C1KK2Qeb.js"
+      ]
+    },
+    "site\\assets": {
+      "path": "site\\assets",
+      "purpose": "Static assets",
+      "fileCount": 7,
+      "lastAccessed": 1789319092399,
+      "keyFiles": [
+        "demo1.png",
+        "demo2.png",
+        "demo3.png"
+      ]
+    },
+    "src\\assets": {
+      "path": "src\\assets",
+      "purpose": "Static assets",
+      "fileCount": 2,
+      "lastAccessed": 1789319092422,
+      "keyFiles": [
+        "logo.png",
+        "react.svg"
+      ]
+    },
+    "src\\components": {
+      "path": "src\\components",
+      "purpose": "UI components",
+      "fileCount": 8,
+      "lastAccessed": 1789319092434,
+      "keyFiles": [
+        "AiFeatureGate.test.tsx",
+        "AiFeatureGate.tsx",
+        "HourGrid.test.tsx"
+      ]
+    },
+    "src\\lib": {
+      "path": "src\\lib",
+      "purpose": "Library code",
+      "fileCount": 9,
+      "lastAccessed": 1789319092444,
+      "keyFiles": [
+        "constants.ts",
+        "job-description.ts",
+        "llmConfig.ts"
+      ]
+    },
+    "src\\test": {
+      "path": "src\\test",
+      "purpose": "Test files",
+      "fileCount": 1,
+      "lastAccessed": 1789319092447,
+      "keyFiles": [
+        "setup.ts"
+      ]
+    },
+    "src\\types": {
+      "path": "src\\types",
+      "purpose": "Type definitions",
+      "fileCount": 14,
+      "lastAccessed": 1789319092454,
+      "keyFiles": [
+        "analysis.ts",
+        "app-config.test.ts",
+        "app-config.ts"
+      ]
+    },
+    "src-tauri\\src": {
+      "path": "src-tauri\\src",
+      "purpose": "Source code",
+      "fileCount": 11,
+      "lastAccessed": 1789319092479,
+      "keyFiles": [
+        "auto_analysis.rs",
+        "browser.rs",
+        "config.rs"
+      ]
+    }
+  },
+  "hotPaths": [],
+  "userDirectives": []
+}
