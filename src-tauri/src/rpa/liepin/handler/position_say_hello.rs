@@ -116,10 +116,13 @@ pub async fn position_say_hello_on_page(
             let db_id = format!("liepin:{}", job.platform_job_id);
             if processed_job_ids.contains(&db_id)
                 || processed_job_ids.contains(&job.platform_job_id)
-                || seen_job_ids.contains(&job.platform_job_id)
             {
                 // 逐条打会把日志刷满，这里只计数，本页结束时汇总
                 stats.skipped_processed += 1;
+                continue;
+            }
+            if seen_job_ids.contains(&job.platform_job_id) {
+                stats.skipped_seen_this_round += 1;
                 continue;
             }
             seen_job_ids.insert(job.platform_job_id.clone());
@@ -141,44 +144,23 @@ pub async fn position_say_hello_on_page(
                 "猎聘处理岗位：{} - {}",
                 job.title, job.company_name
             ))?;
-            if config.job_filter_config.enable_semantic_filter {
-                match crate::llm::evaluate_job_match(&config, &job).await {
-                    Ok(decision) if decision.matched => logger::info(format!(
-                        "猎聘 AI 岗位复核通过（{}分）：{}",
-                        decision.score, decision.reason
-                    ))?,
-                    Ok(decision) => {
-                        stats.skipped_ai += 1;
-                        logger::info(format!(
-                            "猎聘 AI 岗位复核未通过，跳过（{}分）：{}",
-                            decision.score, decision.reason
-                        ))?;
-                        continue;
-                    }
-                    Err(error) => {
-                        stats.skipped_ai += 1;
-                        logger::warning(format!(
-                            "猎聘 AI 岗位复核失败，为避免误投已跳过：{}",
-                            error
-                        ))?;
-                        continue;
-                    }
-                }
-            }
-
-            // 「筛选通过即分析」不关心后面招呼发没发出去，所以在进入打招呼之前就登记
-            auto_analysis::schedule(
-                &build_job_detail(&job, &config, false),
-                AnalysisTrigger::FilterPassed,
-                &config,
-            );
             let greeted = match greet_job(connection, page, job.clone(), config.clone()).await {
-                Ok(false) => {
+                Ok(GreetOutcome::Held) => {
                     stats.skipped_hold += 1;
                     consecutive_greet_failures = 0;
                     false
                 }
-                Ok(true) => {
+                Ok(GreetOutcome::DetailMissing) => {
+                    stats.skipped_detail += 1;
+                    consecutive_greet_failures = 0;
+                    false
+                }
+                Ok(GreetOutcome::SemanticRejected) => {
+                    stats.skipped_ai += 1;
+                    consecutive_greet_failures = 0;
+                    false
+                }
+                Ok(GreetOutcome::Greeted) => {
                     stats.greeted += 1;
                     round_greeted += 1;
                     consecutive_greet_failures = 0;
@@ -247,10 +229,12 @@ struct RoundStats {
     scanned: u32,
     /// 本地库已有记录，之前沟通过
     skipped_processed: u32,
+    skipped_seen_this_round: u32,
     /// 确定性规则未通过
     skipped_rule: u32,
     /// AI 语义复核未通过或失败
     skipped_ai: u32,
+    skipped_detail: u32,
     /// 被拟人化随机跳过（「只看不投」）
     skipped_humanize: u32,
     /// 内容通过了复核，但发送前被闸门整轮拦下（例如模型判断不该投）
@@ -262,13 +246,15 @@ struct RoundStats {
 impl RoundStats {
     fn summary(&self) -> String {
         format!(
-            "猎聘本页 {} 条岗位：打招呼成功 {} 条，失败 {} 条；已沟通跳过 {} 条，规则过滤跳过 {} 条，AI 复核跳过 {} 条，拟人化跳过 {} 条，发送闸门拦下 {} 条",
+            "猎聘本页 {} 条岗位：打招呼成功 {} 条，失败 {} 条；已沟通跳过 {} 条，本轮已检查跳过 {} 条，规则过滤跳过 {} 条，AI 复核跳过 {} 条，职责读取失败跳过 {} 条，拟人化跳过 {} 条，发送闸门拦下 {} 条",
             self.scanned,
             self.greeted,
             self.greet_failed,
             self.skipped_processed,
+            self.skipped_seen_this_round,
             self.skipped_rule,
             self.skipped_ai,
+            self.skipped_detail,
             self.skipped_humanize,
             self.skipped_hold
         )
@@ -645,17 +631,23 @@ fn parse_company_from_card_text(card_text: &str, link_text: &str) -> Option<Stri
         .map(str::to_string)
 }
 
-/// 返回 false 表示这一轮被闸门拦下、什么都没发出去。
-/// 区分出来是为了不把「拦下」计成「打招呼成功」，那会让统计骗人
+/// 区分岗位未读到职责、语义复核拒绝和发送闸门拦截，避免统计为已沟通。
+enum GreetOutcome {
+    Held,
+    DetailMissing,
+    SemanticRejected,
+    Greeted,
+}
+
 async fn greet_job(
     browser_page: &ChromiumPage,
     main_page: &Page,
     mut job: RpaJob,
     config: AppRuntimeConfig,
-) -> Result<bool, anyhow::Error> {
+) -> Result<GreetOutcome, anyhow::Error> {
     if job.detail_url.is_empty() {
         logger::warning("猎聘岗位缺少详情链接，跳过")?;
-        return Ok(false);
+        return Ok(GreetOutcome::DetailMissing);
     }
 
     let page = browser::new_stealth_tab(browser_page)?;
@@ -663,32 +655,63 @@ async fn greet_job(
         page.get(&job.detail_url)?;
         sleep_random_ms(1200, 2000);
 
+        job.detail = text_from_first(
+            &page,
+            &[
+                ".job-intro-container",
+                ".job-detail-box",
+                ".job-description",
+                "[class*='job-intro']",
+                "[class*='description']",
+            ],
+        )?;
         if job.detail.trim().is_empty() {
-            job.detail = text_from_first(
-                &page,
-                &[
-                    ".job-intro-container",
-                    ".job-detail-box",
-                    ".job-description",
-                    "[class*='job-intro']",
-                    "[class*='description']",
-                ],
-            )?;
+            logger::warning(format!("猎聘岗位 {} 未读取到职责，跳过", job.title))?;
+            return Ok(GreetOutcome::DetailMissing);
         }
+
+        if config.job_filter_config.enable_semantic_filter {
+            match crate::llm::evaluate_job_match(&config, &job).await {
+                Ok(decision) if decision.matched => logger::info(format!(
+                    "猎聘 AI 岗位复核通过（{}分）：{}",
+                    decision.score, decision.reason
+                ))?,
+                Ok(decision) => {
+                    logger::info(format!(
+                        "猎聘 AI 岗位复核未通过，跳过（{}分）：{}",
+                        decision.score, decision.reason
+                    ))?;
+                    return Ok(GreetOutcome::SemanticRejected);
+                }
+                Err(error) => {
+                    logger::warning(format!(
+                        "猎聘 AI 岗位复核失败，为避免误投已跳过：{}",
+                        error
+                    ))?;
+                    return Ok(GreetOutcome::SemanticRejected);
+                }
+            }
+        }
+
+        auto_analysis::schedule(
+            &build_job_detail(&job, &config, false),
+            AnalysisTrigger::FilterPassed,
+            &config,
+        );
 
         if is_external_apply_only(&page)? {
             logger::info(format!(
                 "猎聘跳过 {}，该岗位仅支持外部网申，未生成或发送站内消息",
                 job.title
             ))?;
-            return Ok(false);
+            return Ok(GreetOutcome::Held);
         }
 
         let resume_sent = match build_greet_resources(&config, &job).await? {
             // 整轮取消：既不发文本也不发图片，也不记为已沟通
             SendVerdict::Hold(reason) => {
                 logger::info(format!("猎聘跳过 {}，未发送任何内容：{reason}", job.title))?;
-                return Ok(false);
+                return Ok(GreetOutcome::Held);
             }
             SendVerdict::Send(resources) => {
                 let entry = click_first(
@@ -710,7 +733,7 @@ async fn greet_job(
         let saved = save_job_detail(&job, &config, resume_sent);
         auto_analysis::schedule(&saved, AnalysisTrigger::GreetSent, &config);
         logger::info(format!("猎聘 {} 初次沟通成功", job.title))?;
-        Ok(true)
+        Ok(GreetOutcome::Greeted)
     }
     .await;
     if let Err(error) = main_page.run_cdp("Page.bringToFront", None) {
@@ -1723,8 +1746,10 @@ mod tests {
         let stats = RoundStats {
             scanned: 42,
             skipped_processed: 28,
+            skipped_seen_this_round: 3,
             skipped_rule: 8,
             skipped_ai: 3,
+            skipped_detail: 2,
             skipped_humanize: 2,
             skipped_hold: 4,
             greeted: 2,
@@ -1737,8 +1762,10 @@ mod tests {
         assert!(summary.contains("成功 2 条"));
         assert!(summary.contains("失败 1 条"));
         assert!(summary.contains("已沟通跳过 28 条"));
+        assert!(summary.contains("本轮已检查跳过 3 条"));
         assert!(summary.contains("规则过滤跳过 8 条"));
         assert!(summary.contains("AI 复核跳过 3 条"));
+        assert!(summary.contains("职责读取失败跳过 2 条"));
         // 拟人化跳过必须和「规则不匹配」分开记，否则用户会以为自己筛选条件写错了
         assert!(summary.contains("拟人化跳过 2 条"));
         assert!(summary.contains("发送闸门拦下 4 条"));
