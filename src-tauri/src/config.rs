@@ -79,6 +79,8 @@ fn default_resume_config() -> ResumeConfig {
         inject_llm_context: false,
         resume_path: None,
         resume_content: None,
+        liepin_attachment_resume_name: None,
+        boss_attachment_resume_name: None,
     }
 }
 
@@ -1944,6 +1946,14 @@ pub struct ResumeConfig {
 
     /// 简历内容
     pub resume_content: Option<String>,
+
+    /// 猎聘聊天中优先投递的附件简历名称。留空时尝试根据附件预览和岗位匹配。
+    #[serde(default)]
+    pub liepin_attachment_resume_name: Option<String>,
+
+    /// BOSS 聊天中优先投递的附件简历名称。
+    #[serde(default)]
+    pub boss_attachment_resume_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -2461,6 +2471,8 @@ llm_config:
         assert!(!config.resume_config.inject_llm_context);
         assert!(config.resume_config.resume_path.is_none());
         assert!(config.resume_config.resume_content.is_none());
+        assert!(config.resume_config.liepin_attachment_resume_name.is_none());
+        assert!(config.resume_config.boss_attachment_resume_name.is_none());
     }
 
     #[test]

@@ -305,6 +305,8 @@ pub enum ManualReviewReason {
     MissingJobId,
     /// 时间窗内的自动回复额度已用完
     ThrottleExhausted,
+    /// 简历附件无法可靠选择或投递结果无法确认
+    ResumeDelivery,
 }
 
 impl ManualReviewReason {
@@ -314,6 +316,7 @@ impl ManualReviewReason {
             Self::VetRejected => "生成内容未通过体检",
             Self::MissingJobId => "会话标识缺失",
             Self::ThrottleExhausted => "自动回复额度用尽",
+            Self::ResumeDelivery => "简历投递需要确认",
         }
     }
 }

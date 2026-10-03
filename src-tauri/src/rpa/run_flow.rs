@@ -419,6 +419,17 @@ pub fn is_job_task_stop_requested() -> bool {
         .unwrap_or_else(|| JOB_TASK_STOP_REQUESTED.load(Ordering::SeqCst))
 }
 
+/// Stops only the worker owning the obstructed page; other platforms keep running.
+pub fn request_current_job_task_stop() {
+    let managed = CURRENT_JOB_TASK.with(|current| {
+        if let Some((_, cancelled)) = current.borrow().as_ref() {
+            cancelled.store(true, Ordering::SeqCst);
+            true
+        } else { false }
+    });
+    if !managed { JOB_TASK_STOP_REQUESTED.store(true, Ordering::SeqCst); }
+}
+
 /// Installs the cancellation state for one dedicated task worker.
 ///
 /// The guard deliberately is not `Send`: it must be dropped on the worker thread that installed
@@ -427,6 +438,7 @@ pub struct JobTaskContextGuard;
 
 impl Drop for JobTaskContextGuard {
     fn drop(&mut self) {
+        crate::rpa::resume_delivery::clear_task_cache();
         CURRENT_JOB_TASK.with(|current| *current.borrow_mut() = None);
     }
 }
