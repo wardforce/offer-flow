@@ -51,6 +51,8 @@ pub async fn position_say_hello_on_page(
     // 页级 RoundStats 每页都会重置，而预算按整轮算，所以另攒两个整轮计数
     let mut round_greeted = 0u32;
     let mut consecutive_greet_failures = 0u32;
+    let mut consecutive_detail_failures = 0u32;
+    let mut consecutive_pages_without_new_jobs = 0u32;
     let search_url = build_job_search_url(&config);
     let mut processed_job_ids: HashSet<String> = job_detail_dao::list()
         .unwrap_or_default()
@@ -70,6 +72,10 @@ pub async fn position_say_hello_on_page(
     logger::info(format!("正在打开猎聘职位搜索页: {}", search_url))?;
     page.get(&search_url)?;
     sleep_random_ms(1200, 2000);
+    if liepin_security_challenge_present(page)? {
+        logger::warning("猎聘出现安全验证，已停止本轮并保留验证页面；完成验证后请手动恢复任务")?;
+        return Ok(());
+    }
     apply_liepin_filters(page, &config)?;
     sleep_random_ms(1200, 1800);
 
@@ -87,6 +93,10 @@ pub async fn position_say_hello_on_page(
             logger::info(reason)?;
             return Ok(());
         }
+        if liepin_security_challenge_present(page)? {
+            logger::warning("猎聘出现安全验证，已停止本轮并保留验证页面；完成验证后请手动恢复任务")?;
+            return Ok(());
+        }
 
         let jobs = collect_jobs(page)?;
         if jobs.is_empty() {
@@ -96,6 +106,7 @@ pub async fn position_say_hello_on_page(
 
         logger::info(format!("猎聘当前加载到{}条岗位", jobs.len()))?;
         let mut stats = RoundStats::default();
+        let mut found_new_job = false;
         for job in jobs {
             if is_job_task_stop_requested() {
                 logger::info("猎聘求职任务已结束")?;
@@ -126,6 +137,7 @@ pub async fn position_say_hello_on_page(
                 continue;
             }
             seen_job_ids.insert(job.platform_job_id.clone());
+            found_new_job = true;
 
             let filter_decision = verify::filter_decision(&job, &config);
             if !filter_decision.matched {
@@ -153,6 +165,11 @@ pub async fn position_say_hello_on_page(
                 Ok(GreetOutcome::DetailMissing) => {
                     stats.skipped_detail += 1;
                     consecutive_greet_failures = 0;
+                    consecutive_detail_failures += 1;
+                    if consecutive_detail_failures >= 3 {
+                        logger::warning("猎聘连续 3 个岗位未读取到职责，已停止本轮以避免重复访问")?;
+                        return Ok(());
+                    }
                     false
                 }
                 Ok(GreetOutcome::SemanticRejected) => {
@@ -164,11 +181,16 @@ pub async fn position_say_hello_on_page(
                     stats.greeted += 1;
                     round_greeted += 1;
                     consecutive_greet_failures = 0;
+                    consecutive_detail_failures = 0;
                     processed_job_ids.insert(format!("liepin:{}", job.platform_job_id));
                     processed_job_ids.insert(job.platform_job_id.clone());
                     true
                 }
                 Err(error) => {
+                    if error.to_string().contains("猎聘安全验证") {
+                        logger::warning("猎聘出现安全验证，已停止本轮并保留验证页面；完成验证后请手动恢复任务")?;
+                        return Ok(());
+                    }
                     stats.greet_failed += 1;
                     consecutive_greet_failures += 1;
                     logger::warning(greet_failure_message(&job.title, &job.company_name, &error))?;
@@ -187,6 +209,16 @@ pub async fn position_say_hello_on_page(
         logger::info(stats.summary())?;
         if let Some(summary) = pacer.summary() {
             logger::info(summary)?;
+        }
+
+        if found_new_job {
+            consecutive_pages_without_new_jobs = 0;
+        } else {
+            consecutive_pages_without_new_jobs += 1;
+            if consecutive_pages_without_new_jobs >= 2 {
+                logger::info("猎聘连续两次滚动未加载新岗位，结束本轮扫描")?;
+                return Ok(());
+            }
         }
 
         if !scroll_next(page)? {
@@ -654,6 +686,9 @@ async fn greet_job(
     let result = async {
         page.get(&job.detail_url)?;
         sleep_random_ms(1200, 2000);
+        if liepin_security_challenge_present(&page)? {
+            anyhow::bail!("猎聘安全验证")
+        }
 
         job.detail = text_from_first(
             &page,
@@ -1088,9 +1123,9 @@ const SEND_BUTTON_READY_TIMEOUT_MS: u32 = 15000;
 const INPUT_CLEARED_TIMEOUT_MS: u32 = 8000;
 const CHAT_INPUT_MARKER_SELECTOR: &str = "[data-fj-liepin-chat-input='1']";
 const LIEPIN_CONTACT_ENTRY_SELECTORS: &[&str] = &[
-    "a[data-selector='apply-job']",
     "a[data-selector='chat-chat']",
     "a.btn-chat",
+    "a[data-selector='apply-job']",
     ".btn-apply",
     ".apply-btn",
     "button[class*='apply']",
@@ -1270,6 +1305,22 @@ const CLICKABLE_READY_TIMEOUT: Duration = Duration::from_secs(15);
 /// 等待任一选择器出现并点击：命中立刻返回，没出现就继续等到上限。
 fn entry_sends_resume(selector: &str) -> bool {
     selector.contains("apply") && !selector.contains("apply-ats")
+}
+
+/// 安全验证出现时不能继续滚动、访问详情页或重试发送。保留页面让用户自行验证。
+fn liepin_security_challenge_present(page: &Page) -> Result<bool, anyhow::Error> {
+    let value = page.run_js_await(
+        r#"(() => {
+            const visible = (el) => {
+                const style = getComputedStyle(el);
+                return !el.hidden && style.display !== "none" && style.visibility !== "hidden";
+            };
+            return Array.from(document.querySelectorAll("[role=dialog], .ant-modal, [class*=captcha], [class*=verify]"))
+                .filter(visible)
+                .some((el) => /(安全验证|滑块|验证码|访问异常)/.test((el.innerText || el.textContent || "").trim()));
+        })()"#,
+    )?;
+    Ok(value.get("value").and_then(|value| value.as_bool()).or_else(|| value.as_bool()).unwrap_or(false))
 }
 
 fn resume_delivery_label_confirmed(label: &str) -> bool {
@@ -1571,8 +1622,9 @@ mod tests {
 
     #[test]
     fn contact_entry_selectors_prefer_chat_and_exclude_external_apply() {
-        assert_eq!(LIEPIN_CONTACT_ENTRY_SELECTORS[0], "a[data-selector='apply-job']");
-        assert_eq!(LIEPIN_CONTACT_ENTRY_SELECTORS[1], "a[data-selector='chat-chat']");
+        assert_eq!(LIEPIN_CONTACT_ENTRY_SELECTORS[0], "a[data-selector='chat-chat']");
+        assert_eq!(LIEPIN_CONTACT_ENTRY_SELECTORS[1], "a.btn-chat");
+        assert!(LIEPIN_CONTACT_ENTRY_SELECTORS.contains(&"a[data-selector='apply-job']"));
         assert_eq!(LIEPIN_EXTERNAL_APPLY_SELECTOR, "a[data-selector='apply-ats']");
     }
 

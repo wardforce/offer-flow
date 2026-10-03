@@ -415,6 +415,10 @@ export interface ResumeConfig {
   inject_llm_context: boolean;
   resume_path: string | null;
   resume_content: string | null;
+  /** 猎聘聊天中指定投递的附件简历名称；留空时由岗位匹配选择。 */
+  liepin_attachment_resume_name: string | null;
+  /** BOSS 聊天中指定投递的附件简历名称；留空时按附件状态选择。 */
+  boss_attachment_resume_name: string | null;
 }
 
 /** 一套可独立执行的求职方向、简历与沟通策略。 */

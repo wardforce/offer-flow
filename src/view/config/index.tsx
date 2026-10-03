@@ -2459,6 +2459,36 @@ export function ConfigPage(props: ConfigPageProps) {
                 }
               />
             </Form.Item>
+            <Form.Item
+              label="猎聘附件简历名称"
+              name={["resume_config", "liepin_attachment_resume_name"]}
+              extra="优先选择完整名称匹配的附件。名称写错或留空时，根据岗位与附件预览正文匹配；信息不足时转人工。"
+            >
+              <Input
+                allowClear
+                placeholder="例如：吴振华测试开发工程师简历"
+                onChange={(event) =>
+                  props.updateResume({
+                    liepin_attachment_resume_name: event.target.value || null,
+                  })
+                }
+              />
+            </Form.Item>
+            <Form.Item
+              label="BOSS 附件简历名称"
+              name={["resume_config", "boss_attachment_resume_name"]}
+              extra="优先选择完整名称匹配的附件（含扩展名）。名称写错或留空时，根据岗位与附件预览正文匹配；信息不足时转人工。"
+            >
+              <Input
+                allowClear
+                placeholder="例如：吴振华简历_AI工程师_2026-09-11.pdf"
+                onChange={(event) =>
+                  props.updateResume({
+                    boss_attachment_resume_name: event.target.value || null,
+                  })
+                }
+              />
+            </Form.Item>
           </Space>
         );
       case "about":

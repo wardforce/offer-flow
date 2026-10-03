@@ -117,6 +117,8 @@ resume_config: &default_resume
   inject_llm_context: true
   resume_path: ""
   resume_content: ""
+  liepin_attachment_resume_name: ""
+  boss_attachment_resume_name: ""
 job_profiles:
   - id: default
     name: 默认求职方案

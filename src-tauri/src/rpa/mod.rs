@@ -8,5 +8,6 @@ pub mod humanize;
 pub mod liepin;
 pub mod polling;
 pub mod reply_effects;
+pub mod resume_delivery;
 pub mod run_flow;
 pub mod schedule;
