@@ -24,6 +24,19 @@ use uuid::Uuid;
 
 use crate::config::{self, BrowserConfig};
 
+static RETAINED_TASK_TABS: Lazy<Mutex<std::collections::HashSet<String>>> =
+    Lazy::new(|| Mutex::new(std::collections::HashSet::new()));
+
+/// Keep a verification page open after its task exits so it can be handled in Chrome.
+pub fn retain_task_tab(page: &Page) -> Result<()> {
+    RETAINED_TASK_TABS.lock().map_err(|error|anyhow!("保留任务页面失败: {error}"))?.insert(page.tab_id().to_owned());
+    Ok(())
+}
+
+fn tabs_to_close<T>(tabs: Vec<T>, retained: &mut std::collections::HashSet<String>, key: impl Fn(&T) -> String) -> Vec<T> {
+    tabs.into_iter().filter(|tab| !retained.remove(&key(tab))).collect()
+}
+
 // ================================
 // 浏览器环境检测
 // ================================
@@ -251,6 +264,10 @@ impl TaskBrowserLease {
             .lock()
             .map_err(|e| anyhow!("获取任务标签页锁失败: {}", e))?
             .drain();
+        let tabs={
+            let mut retained=RETAINED_TASK_TABS.lock().map_err(|error|anyhow!("保留任务页面失败: {error}"))?;
+            tabs_to_close(tabs,&mut retained,|page|page.tab_id().to_owned())
+        };
         close_task_owned_tabs(tabs)
     }
 }
@@ -1287,5 +1304,13 @@ mod tests {
 
         assert!(result.is_ok());
         assert!(!close_called);
+    }
+
+    #[test]
+    fn cleanup_preserves_verification_tabs_without_consuming_another_workers_marker() {
+        let mut retained=std::collections::HashSet::from(["verification".to_owned(),"other-worker".to_owned()]);
+        let close=tabs_to_close(vec!["finished","verification"],&mut retained,|tab|(*tab).to_owned());
+        assert_eq!(close,vec!["finished"]);
+        assert_eq!(retained,std::collections::HashSet::from(["other-worker".to_owned()]));
     }
 }
