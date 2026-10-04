@@ -6,6 +6,7 @@ pub mod human_input;
 pub mod human_pace;
 pub mod humanize;
 pub mod liepin;
+pub mod job51;
 pub mod polling;
 pub mod reply_effects;
 pub mod resume_delivery;

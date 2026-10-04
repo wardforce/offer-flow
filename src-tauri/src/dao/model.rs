@@ -59,6 +59,12 @@ impl JobProfileSnapshot {
 /// 岗位详情表
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct JobDetail {
+    /// 提交已开始但结果未确认。独立于待办提醒，清空提醒不会允许自动重投。
+    #[serde(default)]
+    pub resume_delivery_pending: bool,
+    /// 实际采集到的原始职位链接；旧记录缺失时保留空值。
+    #[serde(default)]
+    pub source_url: Option<String>,
     /// 岗位唯一ID
     pub id: String,
 

@@ -1199,6 +1199,8 @@ fn build_job_detail(job_id: &str, greet_job: &GreetJob, config: &AppRuntimeConfi
     let now = Local::now().format("%Y-%m-%d %H:%M:%S").to_string();
     let active = config.active_job_profile.as_ref();
     JobDetail {
+        resume_delivery_pending: false,
+        source_url: Some(greet_job.detail_url.clone()),
         id: job_id.to_string(),
         platform: "boss".to_string(),
         source_task_id: crate::rpa::run_flow::current_job_task_id(),

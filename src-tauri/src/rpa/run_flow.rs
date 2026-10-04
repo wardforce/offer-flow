@@ -10,7 +10,7 @@ use rust_drission::{ChromiumPage, Page};
 use serde::{Deserialize, Serialize};
 
 use super::{
-    boss, humanize, liepin, polling,
+    boss, humanize, liepin, job51, polling,
     schedule::{self, PeriodicPlan, PeriodicState, RoundBudget},
 };
 use crate::{config::AppRuntimeConfig, logger};
@@ -83,6 +83,8 @@ impl EnvCheckResult {
 pub enum PlatformKind {
     Boss,
     Liepin,
+    #[serde(rename = "51job")]
+    Job51,
 }
 
 impl PlatformKind {
@@ -91,6 +93,7 @@ impl PlatformKind {
         match self {
             PlatformKind::Boss => "boss",
             PlatformKind::Liepin => "liepin",
+            PlatformKind::Job51 => "51job",
         }
     }
 
@@ -98,6 +101,7 @@ impl PlatformKind {
         match self {
             PlatformKind::Boss => "请使用 BOSS 直聘 App 扫码登录",
             PlatformKind::Liepin => "请使用猎聘 App 扫码登录",
+            PlatformKind::Job51 => "请使用前程无忧 App 或微信扫码登录",
         }
     }
 }
@@ -224,6 +228,7 @@ pub fn inspect_readiness(
         config_group: Some("resume".to_string()),
     });
 
+    let needs_greet = needs_job_filter && platform != PlatformKind::Job51;
     let greet_prompt_missing = config.greet_config.enable_llm
         && config.greet_config.has_enabled_llm_resource()
         && !config.greet_config.prompt_ready();
@@ -231,12 +236,12 @@ pub fn inspect_readiness(
     items.push(ReadinessItem {
         key: "greet".to_string(),
         label: "打招呼话术".to_string(),
-        level: if !needs_job_filter || greet_ready {
+        level: if !needs_greet || greet_ready {
             ReadinessLevel::Ready
         } else {
             ReadinessLevel::Blocked
         },
-        message: if !needs_job_filter {
+        message: if !needs_greet {
             "当前模式不使用打招呼话术".to_string()
         } else if greet_ready {
             "打招呼资源已配置".to_string()
@@ -325,7 +330,7 @@ pub fn inspect_readiness(
         }
         FlowMode::JobHunting | FlowMode::PeriodicJobHunting => {
             config.job_filter_config.enable_semantic_filter
-                || config.greet_config.llm_resource_ready()
+                || platform == PlatformKind::Job51 || config.greet_config.llm_resource_ready()
         }
         FlowMode::SyncChatHistory => false,
     };
@@ -349,6 +354,17 @@ pub fn inspect_readiness(
         config_group: Some("llm".to_string()),
     });
 
+    if platform == PlatformKind::Job51 {
+        items.push(ReadinessItem { key: "platform_mode".into(), label: "平台功能".into(),
+            level: if needs_job_filter { ReadinessLevel::Ready } else { ReadinessLevel::Blocked },
+            message: "51job 支持单轮和周期投递，不支持聊天".into(), config_group: None });
+        if needs_job_filter && !resume_ready {
+            if let Some(item) = items.iter_mut().find(|item| item.key == "resume") {
+                item.level = ReadinessLevel::Blocked;
+                item.message = "请配置简历正文，用于直接投递的置信度判断".into();
+            }
+        }
+    }
     let ready = !items
         .iter()
         .any(|item| item.level == ReadinessLevel::Blocked);
@@ -358,6 +374,7 @@ pub fn inspect_readiness(
             match platform {
                 PlatformKind::Boss => "BOSS 直聘",
                 PlatformKind::Liepin => "猎聘",
+                PlatformKind::Job51 => "前程无忧",
             }
         ),
         format!("模式：{}", mode.display_name()),
@@ -479,6 +496,7 @@ pub async fn check_env(platform: PlatformKind) -> Result<EnvCheckResult, anyhow:
     let result = match platform {
         PlatformKind::Boss => boss::handler::login_check().await?,
         PlatformKind::Liepin => liepin::handler::login_check().await?,
+        PlatformKind::Job51 => job51::login_check().await?,
     };
     let success = result
         .get("success")
@@ -490,6 +508,7 @@ pub async fn check_env(platform: PlatformKind) -> Result<EnvCheckResult, anyhow:
         let qr_base64 = match platform {
             PlatformKind::Boss => boss::handler::login().await?,
             PlatformKind::Liepin => liepin::handler::login().await?,
+            PlatformKind::Job51 => job51::login().await?,
         };
         Ok(EnvCheckResult::login_required(
             platform,
@@ -602,6 +621,7 @@ async fn execute_job_hunting(
     match platform {
         PlatformKind::Boss => boss::handler::position_say_hello(config, budget).await,
         PlatformKind::Liepin => liepin::handler::position_say_hello(config, budget).await,
+        PlatformKind::Job51 => job51::deliver(config, budget).await,
     }
 }
 
@@ -618,6 +638,7 @@ async fn execute_reply_unread(
             liepin::handler::reply_unread(config).await?;
             Ok(())
         }
+        PlatformKind::Job51 => anyhow::bail!("51job 不支持聊天任务"),
     }
 }
 
@@ -635,6 +656,7 @@ async fn execute_job_hunting_on_page(
         PlatformKind::Liepin => {
             liepin::handler::position_say_hello_on_page(connection, main_tab, config, budget).await
         }
+        PlatformKind::Job51 => job51::deliver_on_page(connection, main_tab, config, budget).await,
     }
 }
 
@@ -650,6 +672,7 @@ async fn execute_reply_unread_on_page(
         PlatformKind::Liepin => {
             liepin::handler::reply_unread_on_page(main_tab, config).await?;
         }
+        PlatformKind::Job51 => anyhow::bail!("51job 不支持聊天任务"),
     }
     Ok(())
 }
@@ -740,6 +763,7 @@ enum PeriodicTarget<'a> {
 }
 
 impl<'a> PeriodicTarget<'a> {
+    fn supports_chat(&self) -> bool { !matches!(self, Self::NewTab(PlatformKind::Job51) | Self::OwnedTab(_, _, PlatformKind::Job51)) }
     fn reply_target(&self) -> ReplyTarget<'a> {
         match self {
             Self::NewTab(platform) => ReplyTarget::NewTab(*platform),
@@ -803,7 +827,7 @@ async fn periodic_job_hunting(
             PeriodicState::Idle(open_at) => {
                 if !pause_announced {
                     logger::info(format!(
-                        "当前不在投递时段（{}），暂停投递，{} 恢复；期间继续自动回复未读",
+                        "当前不在投递时段（{}），暂停投递，{} 恢复",
                         schedule::describe_windows(&plan.windows),
                         open_at.format("%m-%d %H:%M"),
                     ))?;
@@ -855,7 +879,7 @@ async fn periodic_job_hunting(
                 };
                 let next_at = schedule::next_delivery_at_after(plan, Local::now(), interval);
                 logger::info(format!(
-                    "本轮投递用时 {} 分钟，下一轮 {} 开始，其间按轮询节奏检查未读",
+                    "本轮投递用时 {} 分钟，下一轮 {} 开始",
                     started.elapsed().as_secs() / 60,
                     next_at.format("%m-%d %H:%M"),
                 ))?;
@@ -882,6 +906,9 @@ async fn idle_until(
     config: &AppRuntimeConfig,
     deadline: DateTime<Local>,
 ) -> Result<bool, anyhow::Error> {
+    if !target.supports_chat() {
+        return Ok(sleep_interruptible(schedule::seconds_until(deadline, Local::now())).await);
+    }
     // 同步历史对话放在空闲期之内而不是之外：它一样要占用浏览器，摆在外面等于
     // 每轮都在周期预算之上再加一笔，投递间隔就名不副实了
     if let Err(error) = target.sync_chat_history().await {

@@ -70,6 +70,7 @@ import { RadioCardGroup } from "@/components/RadioCardGroup";
 import ReplyPollingSection from "./ReplyPollingSection";
 import PeriodicDeliverySection from "./PeriodicDeliverySection";
 import HumanizeSection from "./HumanizeSection";
+import Job51FilterSection from "./Job51FilterSection";
 import {
   jobTypeOptions,
   salaryOptions,
@@ -1157,6 +1158,9 @@ export function ConfigPage(props: ConfigPageProps) {
                 </Form.Item>
               </Col>
             </Row>
+
+            <Job51FilterSection value={props.config.platform_filter_config.job51}
+              onChange={job51 => props.updatePlatformFilter({ job51 })} />
 
             <Card size="small" className="mt-4 border-sky-200! bg-sky-50/50!">
               <div className="flex items-start justify-between gap-4">
@@ -2360,11 +2364,11 @@ export function ConfigPage(props: ConfigPageProps) {
             <Form.Item
               label="最大并行任务数"
               name={["browser_config", "max_parallel_tasks"]}
-              extra="默认为 2, BOSS 与猎聘可各运行一个任务、同一平台的后续任务会排队。"
+              extra="默认为 3，BOSS、猎聘、前程无忧可各运行一个任务；同一平台的后续任务排队。"
             >
               <NumberField
                 min={1}
-                max={2}
+                max={3}
                 precision={0}
                 fallback={DEFAULT_MAX_PARALLEL_TASKS}
                 style={{ width: "100%" }}
@@ -2376,11 +2380,7 @@ export function ConfigPage(props: ConfigPageProps) {
             <Alert
               type="info"
               showIcon
-              message={
-                props.config.browser_config.max_parallel_tasks === 1
-                  ? "单任务模式：预计浏览器占用约 550～900 MB"
-                  : "双任务模式：预计浏览器占用约 750 MB～1.3 GB"
-              }
+              message={`最多同时运行 ${props.config.browser_config.max_parallel_tasks} 个平台任务`}
               description="任务共享一个受管 Chrome，但使用独立连接和标签页；实际占用取决于页面、图片和聊天记录数量。"
             />
           </Space>
@@ -2488,6 +2488,14 @@ export function ConfigPage(props: ConfigPageProps) {
                   })
                 }
               />
+            </Form.Item>
+            <Form.Item label="51job 在线简历名称" name={["resume_config", "job51_online_resume_name"]}
+              extra="填写51job在线简历的完整名称；留空时使用网站当前选中的默认简历。">
+              <Input allowClear placeholder="例如：Java开发简历" onChange={event => props.updateResume({ job51_online_resume_name: event.target.value || null })} />
+            </Form.Item>
+            <Form.Item label="51job 附件简历名称" name={["resume_config", "job51_attachment_resume_name"]}
+              extra="填写附件的完整名称；留空时使用网站选中的附件或唯一附件。存在多个未选附件时进入待办。">
+              <Input allowClear placeholder="例如：Java开发简历.pdf" onChange={event => props.updateResume({ job51_attachment_resume_name: event.target.value || null })} />
             </Form.Item>
           </Space>
         );
