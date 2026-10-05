@@ -441,13 +441,26 @@ async fn process_job(
         return Ok(false);
     }
     read_detail_url(list,job)?;
-    let tab = browser::new_stealth_tab(connection)?;
-    let result = process_detail(&tab, job, config).await;
+    // Keep the exact document the user has verified instead of opening a new
+    // request URL for the same job and discarding that verified document.
+    let existing=connection.tabs()?.into_iter().find(|tab| {
+        tab.tab_id()!=list.tab_id() && tab.url().ok().is_some_and(|url|same_detail_job(&url,&job.platform_job_id))
+    });
+    let reused=existing.is_some();
+    let tab = match existing { Some(tab)=>tab, None=>browser::new_stealth_tab(connection)? };
+    if reused { logger::info(format!("51job复用已打开的岗位详情：{}",job.title))?; }
+    let result = process_detail(&tab, job, config, !reused).await;
     let pending=job_detail_dao::get_by_id(&format!("51job:{}",job.platform_job_id))?.is_some_and(|record|record.resume_delivery_pending);
-    if !is_job_task_stop_requested() && !pending {
+    if !reused && !is_job_task_stop_requested() && !pending {
         let _ = tab.close();
     }
     result
+}
+
+fn same_detail_job(raw: &str,id: &str) -> bool {
+    if id.is_empty() || !id.bytes().all(|byte|byte.is_ascii_digit()) { return false; }
+    tauri::Url::parse(raw).is_ok_and(|url|url.scheme()=="https"
+        && url.host_str()==Some("jobs.51job.com") && url.path().ends_with(&format!("/{id}.html")))
 }
 
 fn read_detail_url(list: &Page, job: &mut RpaJob) -> Result<()> {
@@ -474,8 +487,8 @@ fn read_detail_url(list: &Page, job: &mut RpaJob) -> Result<()> {
     Ok(())
 }
 
-async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig) -> Result<bool> {
-    page.get(&job.detail_url)?;
+async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig, navigate: bool) -> Result<bool> {
+    if navigate { page.get(&job.detail_url)?; }
     for _ in 0..40 {
         if is_job_task_stop_requested() {
             return Ok(false);
@@ -736,6 +749,15 @@ fn build_record(job: &RpaJob, config: &AppRuntimeConfig) -> JobDetail {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn retained_detail_must_match_the_exact_job_and_official_https_host() {
+        assert!(same_detail_job("https://jobs.51job.com/all/173804025.html?req=verified","173804025"));
+        assert!(!same_detail_job("https://jobs.51job.com/all/173804026.html","173804025"));
+        assert!(!same_detail_job("https://jobs.51job.com.evil.example/all/173804025.html","173804025"));
+        assert!(!same_detail_job("http://jobs.51job.com/all/173804025.html","173804025"));
+        assert!(!same_detail_job("https://jobs.51job.com/applysuccess.php?jobid=173804025","173804025"));
+    }
     #[test]
     fn periodic_rounds_rotate_keywords_and_new_tasks_start_at_the_first() {
         let mut cursor=QueryRoundCursor::default();
