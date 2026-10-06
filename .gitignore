@@ -33,7 +33,7 @@ settings.local.json
 
 # Tauri updater signing key (never commit the private key)
 .tauri/*.key
-
+output/OfferFlow-jd-fix.exe
 ./docs/updater-release.md
 
 designs/
