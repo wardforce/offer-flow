@@ -7,6 +7,20 @@ function visible51(el) {
   return true;
 }
 function text51(el) { return (el?.innerText || el?.textContent || '').trim(); }
+export async function qrDataUrl51(doc) {
+  const candidates=[...doc.querySelectorAll('#qrimg,.qrImg img,.login_qr canvas'),...doc.querySelectorAll('img,canvas')];
+  const el=candidates.find(e=>visible51(e) && (e.matches('#qrimg,.qrImg img,.login_qr canvas') || /qr|code/i.test(e.className+' '+(e.src||'')+' '+(e.parentElement?.className||''))) && e.getBoundingClientRect().width>100 && (e.tagName==='CANVAS' || (e.complete && e.naturalWidth>0)));
+  if (!el) return '';
+  if (el.tagName==='CANVAS') return el.toDataURL('image/png');
+  if (el.src.startsWith('data:')) return el.src;
+  const blob=await (await doc.defaultView.fetch(el.src)).blob();
+  return await new Promise((resolve,reject)=>{
+    const reader=new doc.defaultView.FileReader();
+    reader.onload=()=>resolve(reader.result);
+    reader.onerror=()=>reject(new Error('51job QR image export failed'));
+    reader.readAsDataURL(blob);
+  });
+}
 export function markQrEntry51(doc) {
   const el=Array.from(doc.querySelectorAll('[data-sensor-id="sensor_login_wechatScan"]')).find(visible51);
   if (!el) return false;
