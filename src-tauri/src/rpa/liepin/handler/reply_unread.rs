@@ -1019,6 +1019,8 @@ mod tests {
 
     fn job(id: &str, title: &str) -> JobDetail {
         JobDetail {
+            resume_delivery_pending: false,
+            source_url: None,
             id: id.into(),
             platform: "liepin".into(),
             source_task_id: None,

@@ -14,7 +14,7 @@ use crate::{
 const CONFIG_FILE_NAME: &str = "app_config.yaml";
 pub const CURRENT_SCHEMA_VERSION: u32 = 3;
 pub const MIN_PARALLEL_TASKS: usize = 1;
-pub const MAX_PARALLEL_TASKS: usize = 2;
+pub const MAX_PARALLEL_TASKS: usize = 3;
 pub const DEFAULT_JOB_PROFILE_ID: &str = "default";
 pub const DEFAULT_JOB_PROFILE_NAME: &str = "默认求职方案";
 
@@ -81,6 +81,8 @@ fn default_resume_config() -> ResumeConfig {
         resume_content: None,
         liepin_attachment_resume_name: None,
         boss_attachment_resume_name: None,
+        job51_online_resume_name: None,
+        job51_attachment_resume_name: None,
     }
 }
 
@@ -1065,6 +1067,18 @@ pub struct PlatformFilterConfig {
     pub boss: BossFilterConfig,
     #[serde(default)]
     pub liepin: LiepinFilterConfig,
+    #[serde(default)]
+    pub job51: Job51FilterConfig,
+}
+
+#[derive(Serialize, Deserialize, Debug, Clone, Default, PartialEq)]
+pub struct Job51FilterConfig {
+    #[serde(default)]
+    pub salary: Vec<String>,
+    #[serde(default)]
+    pub functions: Vec<String>,
+    #[serde(default)]
+    pub company_size: Vec<String>,
 }
 
 #[derive(Serialize, Deserialize, Debug, Clone, PartialEq)]
@@ -1883,6 +1897,8 @@ fn normalize_job_profiles(config: &mut AppRuntimeConfig) -> Result<(), String> {
             .filter(|description| !description.is_empty());
 
         normalize_analysis_config(&mut profile.analysis_config);
+        crate::rpa::job51::filters::validate(&profile.platform_filter_config.job51)
+            .map_err(|error| format!("求职方案「{}」的51job筛选无效：{error}", profile.name))?;
 
         if profile.id.is_empty() {
             return Err("求职方案标识不能为空".to_string());
@@ -1929,7 +1945,7 @@ fn normalize_job_profiles(config: &mut AppRuntimeConfig) -> Result<(), String> {
 }
 
 fn default_max_parallel_tasks() -> usize {
-    2
+    3
 }
 
 // ================================
@@ -1954,6 +1970,12 @@ pub struct ResumeConfig {
     /// BOSS 聊天中优先投递的附件简历名称。
     #[serde(default)]
     pub boss_attachment_resume_name: Option<String>,
+    /// 51job 在线简历名称。留空时沿用网站当前选中的默认简历。
+    #[serde(default)]
+    pub job51_online_resume_name: Option<String>,
+    /// 51job 附件简历名称。留空时沿用网站选中的附件，或唯一附件。
+    #[serde(default)]
+    pub job51_attachment_resume_name: Option<String>,
 }
 
 #[cfg(test)]
@@ -3153,12 +3175,12 @@ job_profiles: []
     }
 
     #[test]
-    fn browser_parallelism_defaults_to_two_and_is_clamped_to_supported_range() {
+    fn browser_parallelism_defaults_to_three_and_is_clamped_to_supported_range() {
         let legacy = parse_config_content(
             "schema_version: 2\nbrowser_config:\n  user_data_dir: profile\n  chrome_exe_path: null\n",
         )
         .unwrap();
-        assert_eq!(legacy.browser_config.max_parallel_tasks, 2);
+        assert_eq!(legacy.browser_config.max_parallel_tasks, 3);
 
         let mut config = default_app_config();
         config.browser_config.max_parallel_tasks = 99;

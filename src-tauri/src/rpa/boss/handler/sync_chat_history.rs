@@ -161,6 +161,8 @@ pub(super) fn live_job_context(job_id: &str, body: &str) -> Option<JobDetail> {
     if super::reply_unread::parse_encrypt_job_id(body).as_deref() != Some(job_id) { return None; }
     let snapshot = parse_job_snapshot(body);
     Some(JobDetail {
+        resume_delivery_pending: false,
+        source_url: None,
         id: job_id.into(), platform: "boss".into(), source_task_id: None,
         profile_id: None, profile_name: None, profile_snapshot_id: None,
         title: snapshot.title?, detail: snapshot.detail?,
@@ -277,6 +279,8 @@ fn upsert_synced_job(
     };
 
     job_detail_dao::create(JobDetail {
+        resume_delivery_pending: false,
+        source_url: None,
         id: job_id.to_string(),
         platform: "boss".to_string(),
         source_task_id: None,
