@@ -71,7 +71,11 @@ export function captureMarkedJobUrl51(doc) {
 }
 export function applyState51(doc, id) {
   const body=text51(doc.body);
-  if (/滑动验证|访问验证|请按住滑块|安全验证|人机验证/.test(doc.title+' '+body)) return {kind:'blocked'};
+  const tips=text51(doc.getElementById('tips_title'));
+  if (doc.getElementById('tips_title') || /滑动验证|访问验证|请按住滑块|安全验证|人机验证/.test(doc.title+' '+body+' '+tips)) {
+    if (/验证超时|请点击刷新|请点击重试|请刷新页面/.test(body)) return {kind:'blocked_timeout'};
+    return {kind:'blocked'};
+  }
   if (doc.location.hostname==='login.51job.com' || /扫码登录|验证码登录/.test(body)) return {kind:'login'};
   const notices=Array.from(doc.querySelectorAll('.el-dialog__wrapper,.el-dialog__body,.el-message,.successContent,.success-popup-2,[role="alert"]')).filter(visible51);
   const notice=notices.map(text51).join('\n');
@@ -130,4 +134,30 @@ export function markSelection51(doc, action, name) {
   }
   if (!el || !visible51(el)) return false;
   el.setAttribute('data-fj-51-selection','1'); return true;
+}
+
+export function sliderGeometry51(doc) {
+  const s = doc.getElementById('aliyunCaptcha-sliding-slider')
+    || doc.querySelector('.nc_iconfont.btn_slide, .btn_slide, [id*="sliding-slider"]');
+  const b = doc.getElementById('aliyunCaptcha-sliding-text-box')
+    || doc.getElementById('aliyunCaptcha-sliding-body')
+    || doc.querySelector('.nc_scale, [id*="sliding-body"]');
+  if (!s || !b) return null;
+  const r = s.getBoundingClientRect();
+  const q = b.getBoundingClientRect();
+  if (r.width <= 0 || r.height <= 0) return null;
+  const dragDistance = Math.max(q.width, q.right - r.x - r.width) + (Math.floor(Math.random() * 5) + 2);
+  return {
+    x: r.x + r.width / 2,
+    y: r.y + r.height / 2,
+    end: r.x + r.width / 2 + dragDistance,
+    width: r.width,
+    outerWidth: q.width
+  };
+}
+
+export function isSliderTimeout51(doc) {
+  const body = text51(doc.body);
+  const title = text51(doc.getElementById('tips_title'));
+  return /验证超时|请点击刷新|请点击重试|请刷新页面|验证失败.*重试|网络不给力/.test(doc.title + ' ' + body + ' ' + title);
 }

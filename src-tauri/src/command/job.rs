@@ -20,7 +20,7 @@ pub fn job_open_source(id: String) -> CommandResult<()> {
             anyhow::bail!("职位链接不是受支持平台的网页地址");
         }
         #[cfg(target_os = "windows")]
-        { std::process::Command::new("explorer.exe").arg(url.as_str()).spawn()?; }
+        { std::process::Command::new("rundll32.exe").arg("url.dll,FileProtocolHandler").arg(url.as_str()).spawn()?; }
         #[cfg(target_os = "macos")]
         { std::process::Command::new("open").arg(url.as_str()).spawn()?; }
         #[cfg(target_os = "linux")]

@@ -101,7 +101,14 @@ pub async fn prepare_public_jobs(config: &AppRuntimeConfig, limit: usize) -> Res
                     page.get(&job.detail_url)?;
                     for _ in 0..40 {
                         let state=js(&page,&format!("applyState51(document,{})",json!(job.platform_job_id)))?;
-                        if matches!(state["kind"].as_str(),Some("blocked" | "login" | "limit")) {
+                        if matches!(state["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
+                            if !resolve_slider(&page).await? {
+                                request_current_job_task_stop();
+                                bail!("51job公开详情需要完成滑动验证，已保留页面");
+                            }
+                            continue;
+                        }
+                        if matches!(state["kind"].as_str(),Some("login" | "limit")) {
                             request_current_job_task_stop();
                             bail!("51job公开详情需要处理{}，已保留页面",state["kind"]);
                         }
@@ -141,6 +148,151 @@ fn js(page: &Page, expression: &str) -> Result<Value> {
         bail!("51job 页面脚本执行失败");
     }
     Ok(value.get("value").cloned().unwrap_or(value))
+}
+
+/// 自动滑动解锁 51job 访问验证（阿里云盾滑动验证码）
+pub async fn resolve_slider(page: &Page) -> Result<bool> {
+    for attempt in 1..=5 {
+        if is_job_task_stop_requested() {
+            return Ok(false);
+        }
+
+        // 确保窗口处于正常激活状态并置顶
+        if let Ok(window) = page.run_cdp(
+            "Browser.getWindowForTarget",
+            Some(json!({"targetId": page.tab_id()})),
+        ) {
+            if window.get("bounds").and_then(|b| b.get("windowState")).and_then(|s| s.as_str()) == Some("minimized") {
+                if let Some(window_id) = window.get("windowId") {
+                    let _ = page.run_cdp(
+                        "Browser.setWindowBounds",
+                        Some(json!({"windowId": window_id, "bounds": {"windowState": "normal"}})),
+                    );
+                }
+            }
+        }
+        let _ = page.run_cdp("Page.bringToFront", None);
+
+        // 检测是否出现“验证超时，请点击刷新/重试”界面；若出现则立即刷新界面
+        let is_timeout = js(page, "isSliderTimeout51(document)")?.as_bool().unwrap_or(false);
+        if is_timeout {
+            logger::info("51job 出现验证超时界面，正在自动刷新界面...")?;
+            page.refresh()?;
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+        }
+
+        // 等待滑块几何元素就绪
+        let mut geometry = Value::Null;
+        for _ in 0..25 {
+            if is_job_task_stop_requested() {
+                return Ok(false);
+            }
+            if js(page, "isSliderTimeout51(document)")?.as_bool().unwrap_or(false) {
+                logger::info("51job 检测到验证超时提示，正在自动刷新界面...")?;
+                page.refresh()?;
+                tokio::time::sleep(Duration::from_millis(2500)).await;
+                break;
+            }
+            let res = js(page, "sliderGeometry51(document)")?;
+            if res.get("x").is_some() {
+                geometry = res;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+
+        let Some(start_x) = geometry.get("x").and_then(Value::as_f64) else {
+            let state = js(page, "applyState51(document, '')")?;
+            if !matches!(state["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
+                return Ok(true);
+            }
+            // 未找到滑块且仍处于验证页，主动刷新界面
+            logger::info("51job 界面未展示有效滑块，正在刷新页面重新加载...")?;
+            page.refresh()?;
+            tokio::time::sleep(Duration::from_millis(2500)).await;
+            continue;
+        };
+        let start_y = geometry.get("y").and_then(Value::as_f64).unwrap_or(0.0);
+        let end_x = geometry.get("end").and_then(Value::as_f64).unwrap_or(start_x + 300.0);
+
+        logger::info(format!("51job 触发访问验证，正在执行第 {attempt} 次自动滑动解锁..."))?;
+
+        // 移至滑块
+        page.run_cdp("Input.dispatchMouseEvent", Some(json!({
+            "type": "mouseMoved",
+            "x": start_x,
+            "y": start_y
+        })))?;
+        tokio::time::sleep(Duration::from_millis(60)).await;
+
+        // 按下滑块
+        page.run_cdp("Input.dispatchMouseEvent", Some(json!({
+            "type": "mousePressed",
+            "x": start_x,
+            "y": start_y,
+            "button": "left",
+            "buttons": 1,
+            "clickCount": 1
+        })))?;
+        tokio::time::sleep(Duration::from_millis(80)).await;
+
+        // 拟人变速滑动（EaseInOut + 垂直微抖动）
+        let steps = 30;
+        let total_dx = end_x - start_x;
+        for step in 1..=steps {
+            if is_job_task_stop_requested() {
+                let _ = page.run_cdp("Input.dispatchMouseEvent", Some(json!({
+                    "type": "mouseReleased", "x": end_x, "y": start_y, "button": "left", "buttons": 0, "clickCount": 1
+                })));
+                return Ok(false);
+            }
+            let progress = step as f64 / steps as f64;
+            let eased = if progress < 0.5 {
+                2.0 * progress * progress
+            } else {
+                -1.0 + (4.0 - 2.0 * progress) * progress
+            };
+            let current_x = start_x + total_dx * eased;
+            let jitter_y = ((step * 7) % 5) as f64 * 0.4 - 0.8;
+            let current_y = start_y + jitter_y;
+
+            page.run_cdp("Input.dispatchMouseEvent", Some(json!({
+                "type": "mouseMoved",
+                "x": current_x,
+                "y": current_y,
+                "button": "left",
+                "buttons": 1
+            })))?;
+            let delay = 15 + ((step * 11) % 20) as u64;
+            tokio::time::sleep(Duration::from_millis(delay)).await;
+        }
+
+        // 释放鼠标
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        let _ = page.run_cdp("Input.dispatchMouseEvent", Some(json!({
+            "type": "mouseReleased",
+            "x": end_x,
+            "y": start_y,
+            "button": "left",
+            "buttons": 0,
+            "clickCount": 1
+        })));
+
+        // 等待页面跳转或验证状态确认
+        tokio::time::sleep(Duration::from_secs(3)).await;
+
+        let check = js(page, "applyState51(document, '')")?;
+        if !matches!(check["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
+            logger::info("51job 自动滑动解锁成功，已恢复执行！")?;
+            return Ok(true);
+        }
+
+        logger::warning(format!("51job 第 {attempt} 次滑动验证未通过或超时，正在刷新界面重试..."))?;
+        page.refresh()?;
+        tokio::time::sleep(Duration::from_millis(2500)).await;
+    }
+
+    Ok(false)
 }
 
 pub async fn login_check() -> Result<Value> {
@@ -348,7 +500,7 @@ pub async fn deliver_on_page(
             page.click("[data-fj-51-next='1']")?;
             let mut changed = false;
             for _ in 0..40 {
-                check_list_access(page)?;
+                check_list_access(page).await?;
                 if round_finished(&budget, delivered, started, failures)? {
                     return Ok(());
                 }
@@ -398,7 +550,7 @@ async fn wait_list(page: &Page) -> Result<()> {
         if is_job_task_stop_requested() {
             return Ok(());
         }
-        check_list_access(page)?;
+        check_list_access(page).await?;
         let state=js(page,"({cards:document.querySelectorAll('.joblist-item').length, text:text51(document.body)})")?;
         let text = state["text"].as_str().unwrap_or("");
         if state["cards"].as_u64().unwrap_or(0) > 0
@@ -412,14 +564,21 @@ async fn wait_list(page: &Page) -> Result<()> {
     bail!("51job 职位列表加载超时")
 }
 
-fn check_list_access(page: &Page) -> Result<()> {
+async fn check_list_access(page: &Page) -> Result<()> {
     let state=js(page,"applyState51(document,'')")?;
     match state["kind"].as_str() {
-        Some("blocked") | Some("login") => {
+        Some("blocked") | Some("blocked_timeout") => {
+            if resolve_slider(page).await? {
+                return Ok(());
+            }
             browser::retain_task_tab(page)?;
             request_current_job_task_stop();
-            if state["kind"]=="login" { bail!("51job 登录已失效，请重新登录"); }
             bail!("51job 需要完成网页验证");
+        }
+        Some("login") => {
+            browser::retain_task_tab(page)?;
+            request_current_job_task_stop();
+            bail!("51job 登录已失效，请重新登录");
         }
         _ => Ok(()),
     }
@@ -489,7 +648,15 @@ async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig
         }
         let state = js(page, &format!("applyState51(document,{})", json!(job.platform_job_id)))?;
         match state["kind"].as_str().unwrap_or_default() {
-            "blocked" | "login" | "limit" => {
+            "blocked" | "blocked_timeout" => {
+                if resolve_slider(page).await? {
+                    continue;
+                }
+                logger::warning("51job详情页自动滑动未通过，已停止当前任务并保留页面")?;
+                request_current_job_task_stop();
+                bail!("51job详情页要求处理：blocked");
+            }
+            "login" | "limit" => {
                 logger::warning(format!("51job详情页需要处理{}，已停止当前任务并保留页面", state["kind"]))?;
                 request_current_job_task_stop();
                 bail!("51job详情页要求处理：{}", state["kind"]);
@@ -539,7 +706,13 @@ async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig
     match state["kind"].as_str().unwrap_or("") {
         "already" => return Ok(false),
         "ready" => {}
-        "blocked" | "login" | "limit" => {
+        "blocked" | "blocked_timeout" => {
+            if !resolve_slider(page).await? {
+                request_current_job_task_stop();
+                bail!("51job 页面要求处理：blocked");
+            }
+        }
+        "login" | "limit" => {
             request_current_job_task_stop();
             bail!("51job 页面要求处理：{}", state["kind"]);
         }
@@ -602,7 +775,13 @@ async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig
             "selection" => {
                 select_resume(page, config).await?;
             }
-            "blocked" | "login" | "limit" => {
+            "blocked" | "blocked_timeout" => {
+                if !resolve_slider(page).await? {
+                    request_current_job_task_stop();
+                    bail!("51job投递中断：blocked");
+                }
+            }
+            "login" | "limit" => {
                 request_current_job_task_stop();
                 bail!("51job投递中断：{}", state["kind"]);
             }
