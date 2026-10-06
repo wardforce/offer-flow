@@ -1,8 +1,34 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { collectJobs51, listedJobIds51, captureMarkedJobUrl51, markQrEntry51, applyState51, markApply51, readSelection51, markSelection51 } from '../src-tauri/src/rpa/job51/ui.js';
+import { collectJobs51, listedJobIds51, captureMarkedJobUrl51, markQrEntry51, qrDataUrl51, applyState51, markApply51, readSelection51, markSelection51 } from '../src-tauri/src/rpa/job51/ui.js';
 const doc = html => new JSDOM(html, {url:'https://jobs.51job.com/shenzhen/123.html'}).window.document;
+test('exports the official QR image nested inside a plain paragraph, ignoring hidden and unloaded images', async()=>{
+  const d=doc('<img class="qrcode" src="data:image/png;base64,wrong" style="display:none"><div class="login_qr"><div class="qrImg"><p><img id="qrimg" src="data:image/png;base64,correct"></p></div></div>');
+  const img=d.querySelector('#qrimg');
+  img.getBoundingClientRect=()=>({width:150,height:150});
+  Object.defineProperty(img,'complete',{value:true});
+  Object.defineProperty(img,'naturalWidth',{get:()=>loaded?150:0});
+  let loaded=false;
+  assert.equal(await qrDataUrl51(d),'');
+  loaded=true;
+  assert.equal(await qrDataUrl51(d),'data:image/png;base64,correct');
+  img.style.display='none';
+  assert.equal(await qrDataUrl51(d),'');
+});
+test('the injected browser script exports a fetched QR image as base64 for the workspace', async()=>{
+  const {window}=new JSDOM('<div class="qrImg"><p><img id="qrimg" src="/image.php?token=test"></p></div>',{url:'https://login.51job.com/login.php',runScripts:'outside-only'});
+  const img=window.document.querySelector('#qrimg');
+  img.getBoundingClientRect=()=>({width:150,height:150});
+  Object.defineProperties(img,{complete:{value:true},naturalWidth:{value:150}});
+  window.fetch=async url=>{
+    assert.equal(url,'https://login.51job.com/image.php?token=test');
+    return {blob:async()=>new window.Blob(['qr-image'],{type:'image/png'})};
+  };
+  const code=readFileSync(new URL('../src-tauri/src/rpa/job51/ui.js',import.meta.url),'utf8').replaceAll('export function ','function ').replaceAll('export async function ','async function ');
+  assert.equal(await window.eval(`(() => { ${code}\nreturn qrDataUrl51(document); })()`),'data:image/png;base64,cXItaW1hZ2U=');
+});
 test('blocks a slider verification page even before its body loads',()=>{
   assert.equal(applyState51(doc('<title>滑动验证页面</title>'),'123').kind,'blocked');
 });

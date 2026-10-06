@@ -135,7 +135,7 @@ pub async fn preview(config: &AppRuntimeConfig, limit: usize) -> Result<Vec<Appl
 }
 
 fn js(page: &Page, expression: &str) -> Result<Value> {
-    let code = include_str!("ui.js").replace("export function ", "function ");
+    let code = include_str!("ui.js").replace("export function ", "function ").replace("export async function ", "async function ");
     let value = page.run_js_await(&format!("(() => {{ {code}\nreturn {expression}; }})()"))?;
     if value.get("subtype").and_then(Value::as_str) == Some("error") {
         bail!("51job 页面脚本执行失败");
@@ -168,13 +168,7 @@ pub async fn login() -> Result<String> {
                 page.click("[data-fj-51-qr='1']")?;
                 qr_requested = true;
             }
-            let value=js(page,r#"(async()=>{
-                const el=Array.from(document.querySelectorAll('img,canvas')).find(e=>visible51(e) && /qr|code/i.test(e.className+' '+(e.src||'')+' '+(e.parentElement?.className||'')) && e.getBoundingClientRect().width>100);
-                if(!el) return '';
-                if(el.tagName==='CANVAS') return el.toDataURL('image/png');
-                if(el.src.startsWith('data:')) return el.src;
-                const blob=await (await fetch(el.src)).blob(); return await new Promise(resolve=>{const r=new FileReader();r.onload=()=>resolve(r.result);r.readAsDataURL(blob);});
-            })()"#)?;
+            let value=js(page,"qrDataUrl51(document)")?;
             if let Some(encoded)=value.as_str().and_then(|s|s.split_once(";base64,").map(|(_,b)|b)) { return Ok(encoded.into()); }
             tokio::time::sleep(Duration::from_millis(300)).await;
         }
