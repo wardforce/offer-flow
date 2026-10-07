@@ -136,21 +136,30 @@ export function markSelection51(doc, action, name) {
   el.setAttribute('data-fj-51-selection','1'); return true;
 }
 
+export function sliderPassed51(doc) {
+  if (!['jobs.51job.com','we.51job.com'].includes(doc.location.hostname)) return false;
+  const state=applyState51(doc,'').kind;
+  if (['blocked','blocked_timeout','login','limit'].includes(state)) return false;
+  return ['success','selection'].includes(state)
+    || Array.from(doc.querySelectorAll('.job_msg,.joblist-item')).some(el=>visible51(el) && text51(el).length>0)
+    || (doc.location.hostname==='we.51job.com' && /暂无职位|没有找到/.test(text51(doc.body)));
+}
+
 export function sliderGeometry51(doc) {
   const s = doc.getElementById('aliyunCaptcha-sliding-slider')
     || doc.querySelector('.nc_iconfont.btn_slide, .btn_slide, [id*="sliding-slider"]');
-  const b = doc.getElementById('aliyunCaptcha-sliding-text-box')
-    || doc.getElementById('aliyunCaptcha-sliding-body')
+  const b = doc.getElementById('aliyunCaptcha-sliding-body')
+    || doc.getElementById('aliyunCaptcha-sliding-text-box')
     || doc.querySelector('.nc_scale, [id*="sliding-body"]');
-  if (!s || !b) return null;
+  if (!visible51(s) || !visible51(b)) return null;
   const r = s.getBoundingClientRect();
   const q = b.getBoundingClientRect();
-  if (r.width <= 0 || r.height <= 0) return null;
-  const dragDistance = Math.max(q.width, q.right - r.x - r.width) + (Math.floor(Math.random() * 5) + 2);
+  const end = q.right - r.width / 2;
+  if (r.width <= 0 || r.height <= 0 || q.width <= r.width || end <= r.x + r.width / 2) return null;
   return {
     x: r.x + r.width / 2,
     y: r.y + r.height / 2,
-    end: r.x + r.width / 2 + dragDistance,
+    end,
     width: r.width,
     outerWidth: q.width
   };
@@ -159,5 +168,5 @@ export function sliderGeometry51(doc) {
 export function isSliderTimeout51(doc) {
   const body = text51(doc.body);
   const title = text51(doc.getElementById('tips_title'));
-  return /验证超时|请点击刷新|请点击重试|请刷新页面|验证失败.*重试|网络不给力/.test(doc.title + ' ' + body + ' ' + title);
+  return /验证超时|请点击刷新|请点击重试|请刷新页面|验证失败|网络不给力/.test(doc.title + ' ' + body + ' ' + title);
 }

@@ -152,7 +152,7 @@ fn js(page: &Page, expression: &str) -> Result<Value> {
 
 /// 自动滑动解锁 51job 访问验证（阿里云盾滑动验证码）
 pub async fn resolve_slider(page: &Page) -> Result<bool> {
-    for attempt in 1..=5 {
+    for attempt in 1..=3 {
         if is_job_task_stop_requested() {
             return Ok(false);
         }
@@ -187,6 +187,9 @@ pub async fn resolve_slider(page: &Page) -> Result<bool> {
             if is_job_task_stop_requested() {
                 return Ok(false);
             }
+            if js(page, "sliderPassed51(document)")? == true {
+                return Ok(true);
+            }
             if js(page, "isSliderTimeout51(document)")?.as_bool().unwrap_or(false) {
                 logger::info("51job 检测到验证超时提示，正在自动刷新界面...")?;
                 page.refresh()?;
@@ -203,8 +206,8 @@ pub async fn resolve_slider(page: &Page) -> Result<bool> {
 
         let Some(start_x) = geometry.get("x").and_then(Value::as_f64) else {
             let state = js(page, "applyState51(document, '')")?;
-            if !matches!(state["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
-                return Ok(true);
+            if !matches!(state["kind"].as_str(), Some("blocked" | "blocked_timeout")) || attempt == 3 {
+                return Ok(false);
             }
             // 未找到滑块且仍处于验证页，主动刷新界面
             logger::info("51job 界面未展示有效滑块，正在刷新页面重新加载...")?;
@@ -278,13 +281,24 @@ pub async fn resolve_slider(page: &Page) -> Result<bool> {
             "clickCount": 1
         })));
 
-        // 等待页面跳转或验证状态确认
-        tokio::time::sleep(Duration::from_secs(3)).await;
-
-        let check = js(page, "applyState51(document, '')")?;
-        if !matches!(check["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
-            logger::info("51job 自动滑动解锁成功，已恢复执行！")?;
-            return Ok(true);
+        // 只有正常职位内容加载后才确认通过，跳转中的空白页不算成功。
+        for _ in 0..40 {
+            if is_job_task_stop_requested() {
+                return Ok(false);
+            }
+            if js(page, "sliderPassed51(document)")? == true {
+                logger::info("51job 验证后已加载正常职位页面，恢复执行")?;
+                return Ok(true);
+            }
+            if js(page, "isSliderTimeout51(document)")? == true {
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(250)).await;
+        }
+        let state = js(page, "applyState51(document, '')")?;
+        if attempt == 3 || !matches!(state["kind"].as_str(), Some("blocked" | "blocked_timeout")) {
+            logger::warning("51job 未确认验证通过，保留当前页面等待处理")?;
+            return Ok(false);
         }
 
         logger::warning(format!("51job 第 {attempt} 次滑动验证未通过或超时，正在刷新界面重试..."))?;
@@ -773,7 +787,7 @@ async fn process_detail(page: &Page, job: &mut RpaJob, config: &AppRuntimeConfig
                 return Ok(true);
             }
             "selection" => {
-                select_resume(page, config).await?;
+                select_resume(page).await?;
             }
             "blocked" | "blocked_timeout" => {
                 if !resolve_slider(page).await? {
@@ -802,37 +816,23 @@ struct ResumeSelection {
     selected: String,
 }
 
-fn choose_resume(selection: &ResumeSelection, requested: Option<&str>) -> Result<String> {
-    if let Some(name) = requested.map(str::trim).filter(|name| !name.is_empty()) {
-        if selection
-            .names
-            .iter()
-            .filter(|value| value.as_str() == name)
-            .count()
-            != 1
-        {
-            bail!("51job 简历名称未唯一匹配：{name}，请检查当前求职方案");
-        }
-        return Ok(name.into());
-    }
+fn choose_resume(selection: &ResumeSelection) -> Result<String> {
     if !selection.selected.is_empty() && selection.names.contains(&selection.selected) {
         return Ok(selection.selected.clone());
     }
     if selection.names.len() == 1 {
         return Ok(selection.names[0].clone());
     }
-    bail!("51job 存在多份未选定的简历，请在求职方案填写完整名称");
+    bail!("51job 存在多份未选定的简历，请在51job网站选择要投递的简历");
 }
 
-async fn select_resume(page: &Page, config: &AppRuntimeConfig) -> Result<()> {
+async fn select_resume(page: &Page) -> Result<()> {
     let mut selection: ResumeSelection =
         serde_json::from_value(js(page, "readSelection51(document)")?)?;
-    let requested = match selection.kind.as_str() {
-        "online" => config.resume_config.job51_online_resume_name.as_deref(),
-        "attachment" => config.resume_config.job51_attachment_resume_name.as_deref(),
-        _ => bail!("51job 简历选择弹窗未就绪"),
-    };
-    let name = choose_resume(&selection, requested)?;
+    if !matches!(selection.kind.as_str(), "online" | "attachment") {
+        bail!("51job 简历选择弹窗未就绪");
+    }
+    let name = choose_resume(&selection)?;
     let mark = |action: &str| {
         js(
             page,
@@ -982,20 +982,24 @@ mod tests {
         );
     }
     #[test]
-    fn resume_selection_respects_explicit_name_then_site_default() {
+    fn resume_selection_uses_site_default_or_unique_resume() {
         let selection = ResumeSelection {
             kind: "online".into(),
             names: vec!["Java".into(), "测试".into()],
             selected: "Java".into(),
         };
-        assert_eq!(choose_resume(&selection, Some("测试")).unwrap(), "测试");
-        assert_eq!(choose_resume(&selection, None).unwrap(), "Java");
-        assert!(choose_resume(&selection, Some("不存在")).is_err());
+        assert_eq!(choose_resume(&selection).unwrap(), "Java");
         let selection = ResumeSelection {
             selected: String::new(),
             ..selection
         };
-        assert!(choose_resume(&selection, None).is_err());
+        assert!(choose_resume(&selection).is_err());
+        let selection = ResumeSelection {
+            kind: "attachment".into(),
+            names: vec!["Java.pdf".into()],
+            selected: String::new(),
+        };
+        assert_eq!(choose_resume(&selection).unwrap(), "Java.pdf");
     }
     #[test]
     fn direct_apply_respects_the_shared_resume_context_switch() {

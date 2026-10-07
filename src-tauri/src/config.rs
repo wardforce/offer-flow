@@ -81,8 +81,6 @@ fn default_resume_config() -> ResumeConfig {
         resume_content: None,
         liepin_attachment_resume_name: None,
         boss_attachment_resume_name: None,
-        job51_online_resume_name: None,
-        job51_attachment_resume_name: None,
     }
 }
 
@@ -1970,12 +1968,6 @@ pub struct ResumeConfig {
     /// BOSS 聊天中优先投递的附件简历名称。
     #[serde(default)]
     pub boss_attachment_resume_name: Option<String>,
-    /// 51job 在线简历名称。留空时沿用网站当前选中的默认简历。
-    #[serde(default)]
-    pub job51_online_resume_name: Option<String>,
-    /// 51job 附件简历名称。留空时沿用网站选中的附件，或唯一附件。
-    #[serde(default)]
-    pub job51_attachment_resume_name: Option<String>,
 }
 
 #[cfg(test)]

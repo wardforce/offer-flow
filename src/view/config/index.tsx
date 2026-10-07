@@ -2489,14 +2489,6 @@ export function ConfigPage(props: ConfigPageProps) {
                 }
               />
             </Form.Item>
-            <Form.Item label="51job 在线简历名称" name={["resume_config", "job51_online_resume_name"]}
-              extra="填写51job在线简历的完整名称；留空时使用网站当前选中的默认简历。">
-              <Input allowClear placeholder="例如：Java开发简历" onChange={event => props.updateResume({ job51_online_resume_name: event.target.value || null })} />
-            </Form.Item>
-            <Form.Item label="51job 附件简历名称" name={["resume_config", "job51_attachment_resume_name"]}
-              extra="填写附件的完整名称；留空时使用网站选中的附件或唯一附件。存在多个未选附件时进入待办。">
-              <Input allowClear placeholder="例如：Java开发简历.pdf" onChange={event => props.updateResume({ job51_attachment_resume_name: event.target.value || null })} />
-            </Form.Item>
           </Space>
         );
       case "about":

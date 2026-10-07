@@ -2,8 +2,33 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { JSDOM } from 'jsdom';
-import { collectJobs51, listedJobIds51, captureMarkedJobUrl51, markQrEntry51, qrDataUrl51, applyState51, markApply51, readSelection51, markSelection51 } from '../src-tauri/src/rpa/job51/ui.js';
+import { collectJobs51, listedJobIds51, captureMarkedJobUrl51, markQrEntry51, qrDataUrl51, applyState51, markApply51, readSelection51, markSelection51, sliderGeometry51, sliderPassed51 } from '../src-tauri/src/rpa/job51/ui.js';
 const doc = html => new JSDOM(html, {url:'https://jobs.51job.com/shenzhen/123.html'}).window.document;
+
+test('slider stops with the handle inside the rail instead of dragging a full rail width',()=>{
+  const d=doc('<div id="aliyunCaptcha-sliding-body"><div id="aliyunCaptcha-sliding-text-box"></div><span id="aliyunCaptcha-sliding-slider"></span></div>');
+  const slider=d.querySelector('span');
+  slider.getBoundingClientRect=()=>({x:100,y:200,width:40,height:40,right:140});
+  d.querySelector('#aliyunCaptcha-sliding-body').getBoundingClientRect=()=>({x:100,y:200,width:360,height:40,right:460});
+  d.querySelector('#aliyunCaptcha-sliding-text-box').getBoundingClientRect=()=>({x:140,y:200,width:320,height:40,right:460});
+  assert.equal(sliderGeometry51(d).x,120);
+  assert.equal(sliderGeometry51(d).end,440);
+  d.querySelector('#aliyunCaptcha-sliding-text-box').remove();
+  assert.equal(sliderGeometry51(d).end,440);
+  slider.style.display='none';
+  assert.equal(sliderGeometry51(d),null);
+});
+
+test('verification requires visible job content, not an empty or login page',()=>{
+  assert.equal(sliderPassed51(doc('')),false);
+  assert.equal(sliderPassed51(doc('<div>页面加载中</div>')),false);
+  assert.equal(sliderPassed51(doc('<div class="job_msg" style="display:none">Java开发</div>')),false);
+  assert.equal(sliderPassed51(doc('<div class="job_msg">Java开发</div>')),true);
+  assert.equal(sliderPassed51(doc('<div id="tips_title">访问验证</div><div class="job_msg">Java开发</div>')),false);
+  assert.equal(sliderPassed51(new JSDOM('<div class="job_msg">扫码登录</div>',{url:'https://login.51job.com/login.php'}).window.document),false);
+  assert.equal(sliderPassed51(new JSDOM('<div class="joblist-item">Java开发</div>',{url:'https://we.51job.com/pc/search'}).window.document),true);
+  assert.equal(sliderPassed51(new JSDOM('<div>暂无职位</div>',{url:'https://we.51job.com/pc/search'}).window.document),true);
+});
 test('exports the official QR image nested inside a plain paragraph, ignoring hidden and unloaded images', async()=>{
   const d=doc('<img class="qrcode" src="data:image/png;base64,wrong" style="display:none"><div class="login_qr"><div class="qrImg"><p><img id="qrimg" src="data:image/png;base64,correct"></p></div></div>');
   const img=d.querySelector('#qrimg');
